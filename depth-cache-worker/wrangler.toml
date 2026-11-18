@@ -1,0 +1,10 @@
+name = "depth-cache"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# 深度缓存池: 访客算完的深度 png 写进来, 其他访客秒取
+# 绑定 id 部署时由 `npx wrangler kv namespace create DEPTH` 生成后回填
+[[kv_namespaces]]
+binding = "DEPTH"
+id = "6146c0bcd0fa434ca0c1fb399f78f3bd"

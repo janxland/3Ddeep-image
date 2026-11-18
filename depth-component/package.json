@@ -1,0 +1,14 @@
+{
+  "name": "depth-viewer-component",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "<depth-viewer> 自定义元素：访客浏览器内 DA-V2 实时景深（WebGPU→WASM 降级）+ WebGL 小椭圆视差渲染",
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "terser": "^5.36.0"
+  }
+}

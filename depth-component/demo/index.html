@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>&lt;depth-viewer&gt; 组件 demo · 三模式对比</title>
+<style>
+body{margin:0;background:#0b0b0f;color:#eee;font:14px/1.6 system-ui;padding:20px}
+h1{font-size:16px;font-weight:600;margin:0 0 4px}
+.tip{color:#888;font-size:12px;margin-bottom:16px}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+panel{display:block}
+.depth-viewer,.panel{width:400px;height:530px;border-radius:12px;outline:1px solid #222}
+depth-viewer{width:400px;height:530px;border-radius:12px;outline:1px solid #222;position:relative}
+depth-viewer::after{content:attr(data-label);position:absolute;bottom:8px;right:10px;z-index:5;
+color:#fff;font:12px system-ui;text-shadow:0 1px 6px #000;pointer-events:none}
+code{color:#9cf}
+</style></head><body>
+<h1>&lt;depth-viewer&gt; — 三模式对比</h1>
+<div class="tip">
+  <b>mesh-src 真几何</b>（前两格）= 多层补全网格，刚性三角面 + 神经网络补全背景，<b>无水滴感</b> ·
+  <b>depth-src 预计算 warp</b>（第三格）= 单层位移 + 前景刚性遮罩 + 引导滤波，有轻微水滴感<br>
+  滚轮变焦 · 移动鼠标环视 · 鼠标悬停后按 <code>I</code> 看补全区域高亮（mesh 格） · <code>F</code> 翻转
+</div>
+<div class="row">
+  <depth-viewer mesh-src="./img/mesh/e1d28550" data-label="预计算真几何 · 20MB"></depth-viewer>
+  <depth-viewer src="./img/w167-0.jpg" depth-src="./img/w167-0.depth.png" matte-src="./img/w167-0.matte.png" data-label="语义分层·预计算matte"></depth-viewer>
+  <depth-viewer src="./img/w167-2.jpg" data-label="语义分层·全实时(深度+主体识别)"></depth-viewer>
+<script>
+// 同源 vendor 模式: 绕开 CDN 依赖（内网/受限 webview 也能跑全实时模式）——全部绝对 URL
+globalThis.__DEPTH_VIEWER_TFS__ = new URL('./vendor/dist/transformers.min.js', location.href).href
+globalThis.__DEPTH_VIEWER_LOCAL_MODELS__ = new URL('./models/', location.href).href
+globalThis.__DEPTH_VIEWER_WASM__ = new URL('./vendor/dist/', location.href).href
+</script>
+<script src="../dist/depth-component/depth-viewer.js"></script>
+</body></html>

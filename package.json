@@ -1,0 +1,11 @@
+{
+  "name": "depth-wallpaper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "单图转景深壁纸验证：Depth Anything V2 (transformers.js) + 深度图/视差动图导出",
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "gifenc": "^1.0.0"
+  }
+}

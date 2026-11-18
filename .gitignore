@@ -1,0 +1,19 @@
+# 依赖与虚拟环境
+node_modules/
+3d-photo-inpainting/.venv/
+3d-photo-inpainting/__pycache__/
+3d-photo-inpainting/MiDaS/__pycache__/
+# 大模型权重与产物（按 README 命令重新获取/生成）
+3d-photo-inpainting/checkpoints/
+3d-photo-inpainting/MiDaS/model.pt
+3d-photo-inpainting/mesh/
+3d-photo-inpainting/depth/*.npy
+3d-photo-inpainting/output/
+3d-photo-inpainting/image/*.jpg
+3d-photo-inpainting/.git-upstream-vtvl-lab/
+component-assets/
+out/
+models/
+demo/node_modules/
+# 本地服务日志
+*.log
