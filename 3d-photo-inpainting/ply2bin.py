@@ -4,7 +4,7 @@ import sys
 import os
 import json
 import numpy as np
-import pandas as pd
+
 
 PLY = sys.argv[1] if len(sys.argv) > 1 else 'mesh/w167-0.ply'
 OUTDIR = sys.argv[2] if len(sys.argv) > 2 else 'mesh'
@@ -35,16 +35,23 @@ for l in hdr:
 print(f'{PLY}: nv={nv} nf={nf} {W}x{H} hFov={hfov:.3f} vFov={vfov:.3f}')
 
 vhdr_lines = len(hdr)
-vdf = pd.read_csv(PLY, skiprows=vhdr_lines, nrows=nv, sep=r'\s+', header=None, dtype=np.float32)
-assert vdf.shape == (nv, 7), f'vertex 段异常: {vdf.shape}'
-pos = np.ascontiguousarray(vdf.iloc[:, :3].to_numpy(np.float32))
-rgb = vdf.iloc[:, 3:6].to_numpy(np.int32).astype(np.uint8)
-flag = vdf.iloc[:, 6].to_numpy(np.int32).astype(np.uint8)
+# numpy 纯解析（pandas C 扩展损坏时的后备, ~30s/百万行）
+with open(PLY) as f:
+    for _ in range(vhdr_lines):
+        f.readline()
+    vdata = np.loadtxt(f, max_rows=nv, dtype=np.float32)
+assert vdata.shape == (nv, 7), f'vertex 段异常: {vdata.shape}'
+pos = np.ascontiguousarray(vdata[:, :3])
+rgb = vdata[:, 3:6].astype(np.int32).astype(np.uint8)
+flag = vdata[:, 6].astype(np.int32).astype(np.uint8)
 
-fdf = pd.read_csv(PLY, skiprows=vhdr_lines + nv, nrows=nf, sep=r'\s+', header=None, dtype=np.int64)
-assert fdf.shape == (nf, 4), f'face 段异常: {fdf.shape}'
-assert (fdf.iloc[:, 0] == 3).all(), '存在非三角形面'
-idx = fdf.iloc[:, 1:4].to_numpy(np.int64)
+with open(PLY) as f:
+    for _ in range(vhdr_lines + nv):
+        f.readline()
+    fdata = np.loadtxt(f, max_rows=nf, dtype=np.int64)
+assert fdata.shape == (nf, 4), f'face 段异常: {fdata.shape}'
+assert (fdata[:, 0] == 3).all(), '存在非三角形面'
+idx = fdata[:, 1:4]
 assert idx.min() >= 0 and idx.max() < nv
 idx = idx.astype(np.uint32)
 
