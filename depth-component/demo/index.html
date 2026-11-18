@@ -12,6 +12,13 @@ depth-viewer{width:400px;height:530px;border-radius:12px;outline:1px solid #222;
 depth-viewer::after{content:attr(data-label);position:absolute;bottom:8px;right:10px;z-index:5;
 color:#fff;font:12px system-ui;text-shadow:0 1px 6px #000;pointer-events:none}
 code{color:#9cf}
+#switch{display:flex;gap:8px;padding:10px 18px;flex-wrap:wrap}
+#switch button{background:#17171d;border:1px solid #2a2a33;color:#ccc;padding:7px 14px;
+border-radius:8px;font:13px system-ui;cursor:pointer;transition:all .15s}
+#switch button:hover{border-color:#8ab4ff;color:#fff}
+#switch button.on{background:#1e3a5f;border-color:#8ab4ff;color:#fff}
+.stage{padding:0 18px 20px}
+.stage depth-viewer{width:100%;max-width:760px;height:82vh;border-radius:12px;outline:1px solid #222}
 </style></head><body>
 <h1>&lt;depth-viewer&gt; — 三模式对比</h1>
 <div class="tip">
@@ -19,12 +26,15 @@ code{color:#9cf}
   <b>depth-src 预计算 warp</b>（第三格）= 单层位移 + 前景刚性遮罩 + 引导滤波，有轻微水滴感<br>
   滚轮变焦 · 移动鼠标环视 · 鼠标悬停后按 <code>I</code> 看补全区域高亮（mesh 格） · <code>F</code> 翻转
 </div>
-<div class="row">
-  <depth-viewer mesh-src="./img/mesh/e1d28550" data-label="管线 · e1d28550"></depth-viewer>
-  <depth-viewer mesh-src="./img/mesh/w167-2" data-label="原管线 · 白衣vs橙椅"></depth-viewer>
-  <depth-viewer mesh-src="./img/mesh/w167-2-samsmooth" data-label="SAM引导平滑 · 白衣vs橙椅"></depth-viewer>
-  <depth-viewer mesh-src="./img/mesh/w167-3" data-label="原管线 · 三层纵深"></depth-viewer>
-  <depth-viewer mesh-src="./img/mesh/w167-3-samsmooth" data-label="SAM引导平滑 · 三层纵深"></depth-viewer>
+<div id="switch">
+  <button data-m="e1d28550" class="on">1 · e1d28550</button>
+  <button data-m="w167-2">2 · 白衣vs橙椅 原版</button>
+  <button data-m="w167-2-samsmooth">3 · 白衣vs橙椅 SAM平滑</button>
+  <button data-m="w167-3">4 · 三层纵深 原版</button>
+  <button data-m="w167-3-samsmooth">5 · 三层纵深 SAM平滑</button>
+</div>
+<div class="stage">
+  <depth-viewer id="main" mesh-src="./img/mesh/e1d28550"></depth-viewer>
 </div>
 <script>
 // 同源 vendor 模式: 绕开 CDN 依赖（内网/受限 webview 也能跑全实时模式）——全部绝对 URL
@@ -33,4 +43,13 @@ globalThis.__DEPTH_VIEWER_LOCAL_MODELS__ = new URL('./models/', location.href).h
 globalThis.__DEPTH_VIEWER_WASM__ = new URL('./vendor/dist/', location.href).href
 </script>
 <script src="../dist/depth-component/depth-viewer.js"></script>
+<script>
+const w = document.getElementById('main');
+document.getElementById('switch').addEventListener('click', (e) => {
+  const m = e.target.dataset && e.target.dataset.m;
+  if (!m) return;
+  w.setAttribute('mesh-src', './img/mesh/' + m);
+  document.querySelectorAll('#switch button').forEach(b => b.classList.toggle('on', b === e.target));
+});
+</script>
 </body></html>
