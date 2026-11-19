@@ -8,7 +8,7 @@ import json
 import numpy as np
 from PIL import Image
 
-PLY, BGFILL, PERSON_MATTE, OUT, ORIG, PERSON_INST = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+PLY, BGFILL, PERSON_MATTE, OUT, ORIG = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 os.makedirs(OUT, exist_ok=True)
 
 # ── ply 解析（numpy） ──
@@ -59,39 +59,37 @@ ui = np.clip(np.round(u).astype(int), 0, W - 1)
 vi = np.clip(np.round(v).astype(int), 0, H - 1)
 print(f'uv 反解 ✔ (u∈[{u.min():.0f},{u.max():.0f}] v∈[{v.min():.0f},{v.max():.0f}])')
 
-# ── SAM2 物体分割本轮不需要（三组深度带用 matte-person + salient 即可） ──
+# ── SAM2 物体 mask @ (W,H) ──
+from PIL import Image
+from ultralytics import SAM
+import torch
+sam = SAM('sam2.1_s.pt')
+ref = Image.open(ORIG).convert('RGB').resize((W, H), Image.LANCZOS)  # 真实原图喂 SAM（非撒点图）
+res = sam(ref, verbose=False)
+masks = []
+if res and res[0].masks is not None:
+    for m in res[0].masks.data.cpu().numpy():
+        mi = np.asarray(Image.fromarray((m * 255).astype(np.uint8)).resize((W, H), Image.LANCZOS)).astype(np.float32) / 255.0
+        if (mi > 0.35).mean() > 0.02:
+            masks.append(mi)
+masks.sort(key=lambda m: -(m > 0.35).mean())
+masks = masks[:6]
+print(f'SAM ✔ {len(masks)} 物体')
 
-# ── ① 三组深度带: 人物层(matte-person 实例) / 家具层(salient−person=垫子椅子腿) / 背景(不动)
-#    每组各自收敛到自己的中位数带（±0.15 去抖）→ 人物动的时候垫子/椅子腿不再跟着动
-from scipy.ndimage import binary_dilation
-person_m = np.asarray(Image.open(PERSON_INST).convert('L').resize((W, H), Image.LANCZOS)).astype(np.float32) / 255.0
-person_bin = person_m > 0.35
-person_bin = binary_dilation(person_bin, iterations=2)  # 外扩 2px 吸收 matte 边缘误差
-salient = np.asarray(Image.open(PERSON_MATTE).convert('L').resize((W, H), Image.LANCZOS)).astype(np.float32) / 255.0
-furn_m = (salient > 0.35) & (~person_bin)  # 家具区: 显著前景里不属于人物实例的部分（垫子/椅子腿/凳子）
-
+# ── ① 物体内 z 刚体化: 仅 flag==1(原图像素) 顶点; z_new = med + 0.25·clip(z−med, ±0.5)
+#    （消内部噪声抖动=脸不变形/椅子不拉扯; 钳位防远景顶点被拽出→空洞; flag≥2 补全背景顶点不动）
 z_new = z.copy()
 obj_id = np.zeros(nv, dtype=np.int32)
-
-def band_smooth(sel, label):
+for oi, m in enumerate(masks):
+    mv = m[vi, ui] > 0.35
+    sel = mv & (flag == 1)
     if sel.sum() < 500:
-        print(f'  {label}: 顶点不足({sel.sum()}), 跳过', flush=True)
-        return None
+        continue
     med = np.median(z[sel])
-    d = np.clip(z[sel] - med, -0.15, 0.15)
+    d = np.clip(z[sel] - med, -0.15, 0.15)  # 去抖动级: 只消 ±0.15 内的深度噪声, 不动结构(单层 mesh 后移=空洞)
     z_new[sel] = med + d
-    print(f'  {label}: {sel.sum()} 顶点 z_med={med:.2f}', flush=True)
-    return med
-
-sel_person = person_bin[vi, ui] & (flag == 1)
-person_med = band_smooth(sel_person, '人物层')
-if person_med is not None:
-    sel2 = sel_person & (np.abs(z_new - person_med) > 0.05)
-    z_new[sel2] = person_med + np.sign(z_new[sel2] - person_med) * 0.05  # 人物带硬收敛(纯刚体)
-
-sel_furn = furn_m[vi, ui] & (flag == 1) & (~person_bin[vi, ui])
-furn_med = band_smooth(sel_furn, '家具层(垫子/椅子腿)')
-
+    obj_id[sel] = oi + 1
+    print(f'  物体{oi+1}: {sel.sum()} 顶点 z_med={med:.2f} (±0.5 钳位)')
 moved = np.abs(z_new - z) > 0.01
 print(f'z 调整顶点: {moved.sum()}/{nv}')
 
