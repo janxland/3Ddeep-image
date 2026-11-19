@@ -8,7 +8,7 @@ import json
 import numpy as np
 from PIL import Image
 
-PLY, BGFILL, PERSON_MATTE, OUT, ORIG = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+PLY, BGFILL, PERSON_MATTE, OUT, ORIG, PERSON_INST = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 os.makedirs(OUT, exist_ok=True)
 
 # ── ply 解析（numpy） ──
@@ -76,20 +76,36 @@ masks.sort(key=lambda m: -(m > 0.35).mean())
 masks = masks[:6]
 print(f'SAM ✔ {len(masks)} 物体')
 
-# ── ① 物体内 z 刚体化: 仅 flag==1(原图像素) 顶点; z_new = med + 0.25·clip(z−med, ±0.5)
-#    （消内部噪声抖动=脸不变形/椅子不拉扯; 钳位防远景顶点被拽出→空洞; flag≥2 补全背景顶点不动）
+# ── ① 三组深度带: 人物层(matte-person 实例, 硬收敛) / 家具层(salient−person=垫子椅子腿) / 背景不动
+from scipy.ndimage import binary_dilation
+person_m = np.asarray(Image.open(PERSON_INST).convert('L').resize((W, H), Image.LANCZOS)).astype(np.float32) / 255.0
+person_bin = person_m > 0.35  # 严格边界（不外扩——外扩会把椅子边缘像素卷进人物层）
+person_bin_d = binary_dilation(person_bin, iterations=2)
+sal = np.asarray(Image.open(PERSON_MATTE).convert('L').resize((W, H), Image.LANCZOS)).astype(np.float32) / 255.0
+furn_m = (sal > 0.35) & (~person_bin_d)  # 家具区 = 显著前景 − 人物实例（垫子/椅子腿/滚轮椅）
+
 z_new = z.copy()
 obj_id = np.zeros(nv, dtype=np.int32)
-for oi, m in enumerate(masks):
-    mv = m[vi, ui] > 0.35
-    sel = mv & (flag == 1)
+
+def band_smooth(sel, label, lo=0.15):
     if sel.sum() < 500:
-        continue
+        print(f'  {label}: 顶点不足({sel.sum()})', flush=True)
+        return None
     med = np.median(z[sel])
-    d = np.clip(z[sel] - med, -0.15, 0.15)  # 去抖动级: 只消 ±0.15 内的深度噪声, 不动结构(单层 mesh 后移=空洞)
+    d = np.clip(z[sel] - med, -lo, lo)
     z_new[sel] = med + d
-    obj_id[sel] = oi + 1
-    print(f'  物体{oi+1}: {sel.sum()} 顶点 z_med={med:.2f} (±0.5 钳位)')
+    print(f'  {label}: {sel.sum()} 顶点 z_med={med:.2f}', flush=True)
+    return med
+
+sel_person = person_bin[vi, ui] & (flag == 1)
+person_med = band_smooth(sel_person, '人物层', lo=0.05)
+if person_med is not None:
+    sel2 = sel_person & (np.abs(z_new - person_med) > 0.05)
+    z_new[sel2] = person_med + np.sign(z_new[sel2] - person_med) * 0.05  # 人物纯刚体
+
+sel_furn = furn_m[vi, ui] & (flag == 1) & (~person_bin_d[vi, ui])
+furn_med = band_smooth(sel_furn, '家具层(垫子/椅子腿)', lo=0.15)
+
 moved = np.abs(z_new - z) > 0.01
 print(f'z 调整顶点: {moved.sum()}/{nv}')
 
