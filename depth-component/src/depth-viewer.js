@@ -362,8 +362,8 @@ class DepthViewer extends HTMLElement {
     this._st.style.color = '#9fd'
     this._st.textContent = '准备中…'
     try {
-      const gl = this._canvas.getContext('webgl', { antialias: true })
-        || this._canvas.getContext('experimental-webgl', { antialias: true })
+      const gl = this._canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true })
+        || this._canvas.getContext('experimental-webgl', { antialias: true, preserveDrawingBuffer: true })
       if (!gl) throw new Error('浏览器不支持 WebGL')
       this._gl = gl
 
