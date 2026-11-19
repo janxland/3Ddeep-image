@@ -270,7 +270,7 @@ function mat4Mul(a, b) {
 
 class DepthViewer extends HTMLElement {
   static get observedAttributes() {
-    return ['src', 'depth-src', 'mesh-src', 'amp', 'zoom-max', 'idle-seconds', 'quality', 'cache-endpoint', 'fg-cut']
+    return ['src', 'depth-src', 'mesh-src', 'cutout-src', 'layers-src', 'bg-src', 'amp', 'zoom-max', 'idle-seconds', 'quality', 'cache-endpoint', 'fg-cut']
   }
 
   constructor() {
@@ -355,8 +355,9 @@ class DepthViewer extends HTMLElement {
   async _init() {
     const meshSrc = this.getAttribute('mesh-src')
     const src = this.getAttribute('src')
+    const cutSrc = this.getAttribute('cutout-src')
     if (this._loading) return
-    if (!meshSrc && !src) return
+    if (!meshSrc && !cutSrc && !src) return
     this._loading = true
     this._ready = false
     this._st.style.color = '#9fd'
@@ -367,7 +368,21 @@ class DepthViewer extends HTMLElement {
       if (!gl) throw new Error('浏览器不支持 WebGL')
       this._gl = gl
 
-      if (meshSrc) {
+      if (cutSrc) {
+        // ── 抠图双层模式: 人物 RGBA 平面(近) ∥ LaMa 背景平面(远) ──
+        this._mode = 'cutout'
+        this._st.textContent = '加载双层资产…'
+        this._setupCutout(gl)
+        const layersSrc = this.getAttribute('layers-src')
+        const layers = layersSrc ? await fetch(layersSrc).then(r => r.json()) : { personZ: 1.6, bgZ: 2.4, f: 960 }
+        const [cb, cf] = await Promise.all([
+          fetch(cutSrc).then(r => r.arrayBuffer()),
+          fetch(this.getAttribute('bg-src') || '').then(r => r.ok ? r.arrayBuffer() : null),
+        ])
+        this._uploadCutout(gl, cutSrc, this.getAttribute('bg-src'), cb, cf, layers)
+        this._ready = true
+        this._st.textContent = '✔ 抠图双层 · 人物z' + layers.personZ + '/背景z' + layers.bgZ
+      } else if (meshSrc) {
         // ── 真几何模式 ──
         this._mode = 'mesh'
         this._st.textContent = '加载真几何 mesh…'

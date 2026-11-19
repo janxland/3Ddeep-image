@@ -1,0 +1,200 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>抠图双层 · 人物+背景</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
+canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+#switch{position:fixed;right:14px;bottom:12px;z-index:10;display:flex;gap:6px;opacity:.35;transition:opacity .3s}
+#switch:hover{opacity:.9}
+#switch button{background:rgba(255,255,255,.12);border:0;color:#fff;padding:6px 12px;
+border-radius:14px;font:12px system-ui;cursor:pointer}
+#switch button.on{background:rgba(120,180,255,.55)}
+#stat{position:fixed;top:10px;left:12px;color:#9fd;font:12px/1.5 monospace;text-shadow:0 1px 6px #000;pointer-events:none}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="switch">
+  <button data-m="w167-3" class="on">w167-3</button>
+  <button data-m="w167-2">w167-2</button>
+</div>
+<div id="stat">加载中…</div>
+<script>window.onerror = function(m, s2, l) { var st = document.getElementById('stat'); st.style.color = '#f99'; st.textContent = 'ERR: ' + m + ' @' + l; };</script>
+<script>
+'use strict';
+const stat = document.getElementById('stat');
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true });
+
+const VS = 'attribute vec3 aPos; attribute vec2 aUv; uniform mat4 uMVP; varying vec2 vUv;\n' +
+  'void main(){ vUv = aUv; gl_Position = uMVP * vec4(aPos, 1.0); }';
+const FS = 'precision mediump float;\n' +
+  'uniform sampler2D uTex0; uniform sampler2D uTex1; uniform float uLayer; varying vec2 vUv;\n' +
+  'void main(){\n' +
+  '  if (uLayer < 0.5) { gl_FragColor = vec4(texture2D(uTex0, vUv).rgb, 1.0); }\n' +
+  '  else { vec4 c = texture2D(uTex1, vUv); if (c.a < 0.004) discard;\n' +
+  '         gl_FragColor = vec4(c.rgb, c.a); }\n' +
+  '}';
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw gl.getProgramInfoLog(prog);
+gl.useProgram(prog);
+const U = n => gl.getUniformLocation(prog, n);
+const uMVP = U('uMVP'), uLayer = U('uLayer');
+gl.uniform1i(U('uTex0'), 0);
+gl.uniform1i(U('uTex1'), 1);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+const aUv = gl.getAttribLocation(prog, 'aUv');
+gl.enable(gl.DEPTH_TEST);
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+// ── 双平面: 人物 RGBA 平面(近, 图像框精确) ∥ 背景 LaMa 平面(远, 外扩 1.8×) ──
+// 世界约定: x 右, y 下, z 前进; 相机在原点看 +z; 图像框半宽 ax=(W/2)/f, 半高 ay=(H/2)/f, f=像素焦距
+let drawList = [], ready = false, meta = null;
+function buildPlanes(L) {
+  meta = L;
+  drawList = [];
+  const tanH = (L.W / 2) / L.f, tanV = (L.H / 2) / L.f;
+  function plane(z, span, texUnit, layer) {
+    // span=1 → 图像框精确; span>1 → 外扩(背景用, uv 超界 clamp 拉伸边缘)
+    const hw = tanH * z * span, hh = tanV * z * span;
+    const u0 = 0.5 - 0.5 / span, u1 = 0.5 + 0.5 / span;
+    const v0 = 0.5 - 0.5 / span, v1 = 0.5 + 0.5 / span;
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    // 顶点顺序: 左上(y=-hh,uv(u0,v0)) 右上 左下 右下 — y 负=图像上方
+    const v = new Float32Array([
+      -hw, -hh, z, u0, v0,
+       hw, -hh, z, u1, v0,
+      -hw,  hh, z, u0, v1,
+       hw,  hh, z, u1, v1,
+    ]);
+    gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 2, 1, 1, 2, 3]), gl.STATIC_DRAW);
+    return { vbo, ibo, n: 6, texUnit, layer };
+  }
+  drawList.push(Object.assign(plane(L.bgZ, 1.8, 0, 0), { texUnit: 0, layer: 0 }));
+  drawList.push(Object.assign(plane(L.personZ, 1.0, 1, 1), { texUnit: 1, layer: 1 }));
+  drawList.sort((a, b) => b.z - a.z); // 远(背景)先画
+}
+
+let iw = 0, ih = 0;
+function loadSet(name) {
+  ready = false;
+  stat.textContent = '加载 ' + name + '…';
+  const base = './img/';
+  fetch(base + name + '.layers.json').then(r => r.json()).then(L => {
+    buildPlanes(L);
+    const imB = new Image(), imP = new Image();
+    let n = 0;
+    const onl = () => {
+      if (++n === 2) {
+        ready = true;
+        stat.textContent = '✔ ' + name + ' 双层 personZ=' + L.personZ + ' bgZ=' + L.bgZ;
+      }
+    };
+    const up = (im, tex, unit, url) => {
+      im.onload = () => {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+        onl();
+      };
+      im.src = url;
+    };
+    up(imB, gl.createTexture(), 0, base + name + '.bgfill.png');
+    up(imP, gl.createTexture(), 1, base + name + '.cutout.png');
+  }).catch(e => { stat.textContent = '✘ ' + e; });
+}
+loadSet('w167-3');
+
+function fit() {
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  canvas.width = Math.floor(innerWidth * dpr);
+  canvas.height = Math.floor(innerHeight * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+addEventListener('resize', fit); fit();
+
+let tx = 0, ty = 0, mx = 0, my = 0, idle = 0, zoom = 1, last = performance.now();
+addEventListener('mousemove', e => {
+  tx = (e.clientX / innerWidth) * 2 - 1;
+  ty = (e.clientY / innerHeight) * 2 - 1;
+  idle = 0;
+});
+addEventListener('touchmove', e => {
+  if (e.touches[0]) { tx = (e.touches[0].clientX / innerWidth) * 2 - 1; ty = (e.touches[0].clientY / innerHeight) * 2 - 1; idle = 0; }
+}, { passive: true });
+addEventListener('wheel', e => {
+  zoom = Math.min(3.5, Math.max(1, zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+  stat.textContent = '缩放 ×' + zoom.toFixed(2);
+  idle = 0;
+}, { passive: true });
+
+function mat4Mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+function mat4T(x, y, z) { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]); }
+function mat4Persp(vFov, aspect, near, far) {
+  const f = 1 / Math.tan(vFov / 2), A = (far + near) / (far - near), B = -2 * far * near / (far - near);
+  // 相机看 +z（世界 z 向前）, y 向下约定 → clip.y 取负, w = z
+  return new Float32Array([f/aspect,0,0,0, 0,-f,0,0, 0,0,A,1, 0,0,B,0]);
+}
+
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000); last = t; idle += dt;
+  gl.clearColor(0.02, 0.02, 0.03, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  if (ready && meta) {
+    // 平移主导相机（头动视差）: 眼睛椭圆平移, 看向前方 → 人物(近)位移 > 背景(远)
+    const ex = idle > 4 ? Math.sin(t / 1000 * 0.6) * 0.19 : mx * 0.19;
+    const ey = idle > 4 ? Math.cos(t / 1000 * 0.45) * 0.10 : -my * 0.10;
+    const aspect = canvas.width / canvas.height;
+    const vFov = 2 * Math.atan((meta.H / 2) / meta.f);
+    const p = mat4Persp(vFov / zoom, aspect, 0.05, 40);
+    const v = mat4T(-ex, -ey, 0);
+    gl.uniformMatrix4fv(uMVP, false, mat4Mul(p, v));
+    for (const d of drawList) {
+      // 防御式: 每次绘制前完整恢复 attrib 状态（异常 webview 会静默关闭属性数组）
+      gl.bindBuffer(gl.ARRAY_BUFFER, d.vbo);
+      gl.enableVertexAttribArray(aPos);
+      gl.enableVertexAttribArray(aUv);
+      gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 20, 0);
+      gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 20, 12);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, d.ibo);
+      gl.uniform1f(uLayer, d.layer);
+      gl.drawElements(gl.TRIANGLES, d.n, gl.UNSIGNED_SHORT, 0);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+document.getElementById('switch').addEventListener('click', e => {
+  const m = e.target.dataset && e.target.dataset.m;
+  if (!m) return;
+  loadSet(m);
+  document.querySelectorAll('#switch button').forEach(b => b.classList.toggle('on', b === e.target));
+});
+</script>
+</body></html>
