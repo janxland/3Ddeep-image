@@ -1,6 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>&lt;depth-viewer&gt; — 管线三图对比</title>
+<title>&lt;depth-viewer&gt; — CVPR20 管线三图（单面板切换）</title>
 <style>
 body{margin:0;background:#0b0b0f;color:#eee;font:14px/1.6 system-ui;padding:20px}
 h1{font-size:16px;font-weight:600;margin:0 0 4px}
@@ -18,14 +18,11 @@ border-radius:8px;font:13px system-ui;cursor:pointer;transition:all .15s}
   <button data-m="e1d28550" class="on">1 · e1d28550</button>
   <button data-m="w167-2">2 · 白衣vs橙椅</button>
   <button data-m="w167-3">3 · 三层纵深</button>
-  <button data-m="w167-3-samsmooth">4 · w167-3 SAM平滑</button>
-  <button data-m="w167-2">5 · 白衣vs橙椅 原管线</button>
 </div>
 <div class="stage">
   <depth-viewer id="main" mesh-src="./img/mesh/e1d28550"></depth-viewer>
 </div>
 <script>
-// 同源 vendor 模式: 绕开 CDN 依赖（内网/受限 webview 也能跑全实时模式）——全部绝对 URL
 globalThis.__DEPTH_VIEWER_TFS__ = new URL('./vendor/dist/transformers.min.js', location.href).href
 globalThis.__DEPTH_VIEWER_LOCAL_MODELS__ = new URL('./models/', location.href).href
 globalThis.__DEPTH_VIEWER_WASM__ = new URL('./vendor/dist/', location.href).href
