@@ -2,7 +2,10 @@
 // 职责: ① 深度推理(ORT Web: WebGPU→WASM SIMD, 质量阶梯) ② mini-LDI 网格构建 ③ meshopt 资产解码
 // 编排(缓存层/IO)在 depth-scene.js; 本文件只做纯计算。config 由调用方注入, 不读 globalThis。
 
-import { MeshoptDecoder } from 'meshoptimizer/decoder' // wasm 内嵌自包含(32KB), 打进 bundle 零外部依赖
+import { MeshoptDecoder } from 'meshoptimizer/decoder'
+import { occlusionMask } from './occlusion.js'
+import { createMigan } from './migan.js'
+import { decompose } from './decomposer.js' // wasm 内嵌自包含(32KB), 打进 bundle 零外部依赖
 
 export const QUALITY_LADDER = [
   { id: 'onnx-community/depth-anything-v2-base', dtype: 'fp16', device: 'webgpu', bytes: 194.6e6 },
@@ -58,13 +61,18 @@ async function getPipe(cfg, onStage) {
   return pipes[q]
 }
 
-// ① 端内推理: fetch 图 → DA-V2 → 灰度深度 PNG blob(亮=近)。worker/主线程通用。
-export async function inferDepth(url, cfg, onStage) {
+// ① 端内推理: fetch 图(blobIn 已有则跳过 fetch)→ DA-V2 → 灰度深度 PNG blob(亮=近)
+export async function inferDepth(url, cfg, onStage, blobIn = null) {
   const pipe = await getPipe(cfg, onStage)
-  const resp = await fetch(url, { mode: 'cors' })
-  if (!resp.ok) throw new Error('图片加载失败 ' + resp.status)
   const tfs = await getTfs(cfg)
-  const img = await tfs.RawImage.fromBlob(await resp.blob())
+  let img
+  if (blobIn) {
+    img = await tfs.RawImage.fromBlob(blobIn) // 主线程已取好的原图 blob(绕过 worker 网络限制)
+  } else {
+    const resp = await fetch(url, { mode: 'cors' })
+    if (!resp.ok) throw new Error('图片加载失败 ' + resp.status)
+    img = await tfs.RawImage.fromBlob(await resp.blob())
+  }
   const out = await pipe(img)
   const d = out.depth
   const cnv = typeof OffscreenCanvas !== 'undefined'
@@ -159,13 +167,26 @@ export async function decodeMeshopt({ verts, faces, vStride, nv, nf }) {
 /* eslint-disable no-undef */
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function' && typeof importScripts === 'function') {
   let CFG = null
+  let miganP = null // MI-GAN 会话单例(懒加载, 26.8MB IndexedDB 缓存)
+  const getMigan = () => miganP || (miganP = createMigan({
+    ortSources: CFG.miganOrt, modelSources: CFG.miganModel, cacheName: CFG.miganCache || 'depth-scene-models',
+    onProgress: (stage) => self.postMessage({ job: -1, stage }),
+  }).catch((e) => { miganP = null; throw e }))
+  function packFields(pack) {
+    const { GW, GH, depthRGBA, matteRGBA } = pack
+    const dp = new Float32Array(GW * GH)
+    const pm = new Uint8Array(GW * GH)
+    for (let i = 0; i < GW * GH; i++) { dp[i] = depthRGBA[i * 4] / 255; pm[i] = matteRGBA[i * 4 + 3] > 128 ? 1 : 0 }
+    return { dp, pm, GW, GH }
+  }
   self.onmessage = async (e) => {
     const { type, job } = e.data
     try {
       if (type === 'init') { CFG = e.data.cfg; return self.postMessage({ job, ok: true }) }
       if (type === 'inferDepth') {
         const t0 = performance.now()
-        const blob = await inferDepth(e.data.url, CFG, (stage) => self.postMessage({ job, stage }))
+        // blob = 主线程取好的【原图】blob → 必须真跑推理得到深度; 只有缺失时才 worker 自行 fetch
+        const blob = await inferDepth(e.data.url, CFG, (stage) => self.postMessage({ job, stage }), e.data.blob || null)
         self.postMessage({ job, blob, ms: Math.round(performance.now() - t0) })
       } else if (type === 'buildMesh') {
         const t0 = performance.now()
@@ -176,6 +197,41 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function' && typ
         const t0 = performance.now()
         const out = await decodeMeshopt(e.data)
         self.postMessage({ job, ...out, ms: Math.round(performance.now() - t0) }, [out.verts, out.faces])
+      } else if (type === 'occlusion') {
+        // SLIDE 遮挡掩码 S
+        const { dp, pm, GW, GH } = packFields(e.data.pack)
+        const occ = occlusionMask(dp, pm, GW, GH, e.data.opts)
+        let holes = 0
+        for (let i = 0; i < occ.length; i++) if (occ[i]) holes++
+        self.postMessage({ job, occ: occ.buffer, holes }, [occ.buffer])
+      } else if (type === 'decompose') {
+        // 两层软分解(SoftLayerDecomposer 对齐): mask/alpha/双层深度 + MI-GAN 脚印补全
+        self.postMessage({ job, stage: 'worker:decompose-enter' })
+        const t0 = performance.now()
+        const aiAdapter = e.data.generative
+          ? async (fill, aiHole, w, h) => {
+              const migan = await getMigan()
+              const imageRGBA = new Uint8ClampedArray(w * h * 4)
+              const maskRGBA = new Uint8ClampedArray(w * h * 4)
+              for (let i = 0; i < w * h; i++) {
+                imageRGBA[i * 4] = fill[i * 3]; imageRGBA[i * 4 + 1] = fill[i * 3 + 1]; imageRGBA[i * 4 + 2] = fill[i * 3 + 2]; imageRGBA[i * 4 + 3] = 255
+                maskRGBA[i * 4 + 3] = aiHole[i] ? 255 : 0
+              }
+              const out = await migan.inpaint(imageRGBA, maskRGBA, w, h)
+              if (!out) return null
+              const rgb = new Float32Array(w * h * 3)
+              for (let i = 0; i < w * h; i++) { rgb[i * 3] = out.rgba[i * 4]; rgb[i * 3 + 1] = out.rgba[i * 4 + 1]; rgb[i * 3 + 2] = out.rgba[i * 4 + 2] }
+              return rgb
+            }
+          : null
+        const out = await decompose(e.data.imageRGBA, e.data.depthGray, e.data.w0, e.data.h0,
+          { aiInpaint: aiAdapter, maskOverride: e.data.maskOverride, onStage: (st) => self.postMessage({ job, stage: st }) })
+        self.postMessage({ job, ...out, ms: Math.round(performance.now() - t0) },
+          [out.bgImage.buffer, out.bgDepth.buffer, out.fgImage.buffer, out.fgDepth.buffer, out.fgAlpha.buffer])
+      } else if (type === 'inpaint') {
+        const migan = await getMigan()
+        const out = await migan.inpaint(e.data.imageRGBA, e.data.maskRGBA, e.data.w, e.data.h)
+        self.postMessage({ job, rgba: out ? out.rgba : null, ms: out ? out.ms : 0 })
       }
     } catch (err) {
       self.postMessage({ job, error: String(err && err.message || err), stack: String(err && err.stack ? err.stack.split('\n').slice(0, 4).join(' | ') : '') })
