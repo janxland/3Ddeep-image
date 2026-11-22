@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mask-editor 测试(零推理)</title>
+<style>body{margin:0;background:#101418;color:#ccc;font:13px system-ui;padding:16px}depth-scene{display:block;width:760px;height:520px;border-radius:12px}</style>
+</head><body>
+<p>✏ 修正抠图: 点击右上按钮 → 画笔/橡皮修正人物区 → 应用(7ms 重建)。</p>
+<depth-scene id="t" autoplay="true" src="./img/e1d28550.jpg" depth-src="./img/e1d28550.depth.png"></depth-scene>
+<script type="module">
+  import '../dist/depth-component/depth-scene.js'
+  const el = document.getElementById('t')
+  el.addEventListener('d3d-ready', (e) => console.log('ready', e.detail))
+  el.addEventListener('d3d-error', (e) => console.log('error', e.detail))
+</script>
+</body></html>

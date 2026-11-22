@@ -25,8 +25,11 @@
 - **现象**：MiDaS v2 边界糊、平面不平（墙面/地板有波动）
 - **根因**：2020 模型 + affine-invariant disparity 目标（视觉优先，几何精度次之）
 
-### P5 资产体积
-- 66MB/图（量化后），deflate 可至 20MB；移动端偏重
+### P5 资产体积 ✅ 已解决（2026-11-22）
+- **meshopt 编码**：reorderMesh 重排 + 位打包 + deflate 组合，66MB → **3-4.7MB/图（17-25x）**
+- `scripts/meshopt-encode.mjs`；组件端 `asset-bins.js` 解码跑 Worker（MeshoptDecoder wasm 内嵌打包）
+- 顶点 stride 10B→12B（meshopt 4 字节对齐硬要求），渲染端按 meta.vStride 参数化
+- 实测全链路：4.7MB 下载+解码+上传 → **270ms** 出画面
 
 ## 二、前沿方案映射（2025-11 检索）
 

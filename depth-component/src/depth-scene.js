@@ -68,7 +68,7 @@ class DepthScene extends HTMLElement {
     this._root.innerHTML = `
       <style>
         :host{display:block;position:relative;overflow:hidden;contain:content;
-              background:var(--d3d-surface, #000);
+              background:var(--d3d-surface, transparent);
               border-radius:var(--d3d-radius, 0)}
         canvas{position:absolute;inset:0;width:100%;height:100%;display:block;
                cursor:var(--d3d-cursor, crosshair)}

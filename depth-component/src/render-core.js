@@ -211,7 +211,7 @@ export function createRenderer(canvas, gl) {
   }
 
   R.clear = () => {
-    gl.clearColor(0.02, 0.02, 0.03, 1)
+    gl.clearColor(0, 0, 0, 0) // 透明清屏: 预乘 alpha 下 a=0 时 RGB 必须为 0
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     gl.enable(gl.DEPTH_TEST)
   }
