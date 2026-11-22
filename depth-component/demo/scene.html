@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>&lt;depth-scene&gt; — 一图转 3D 景深原生组件</title>
+<style>
+  :root{ --d3d-surface:#05070d; --d3d-radius:14px; --d3d-status:#9fd3ff; --d3d-hint:#fff }
+  *{box-sizing:border-box}
+  body{margin:0;background:#07090f;color:#dbe4f0;font:14px/1.6 system-ui,-apple-system,sans-serif}
+  header{padding:28px 32px 0}
+  h1{margin:0 0 6px;font-size:22px;font-weight:650;letter-spacing:.2px}
+  h1 code{color:#7dd0ff}
+  .sub{color:#7a8699;font-size:13px}
+  .sub code{color:#a5b4fc;background:rgba(99,102,241,.12);padding:1px 6px;border-radius:5px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:20px 32px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{position:relative;border-radius:var(--d3d-radius);overflow:hidden;background:var(--d3d-surface);
+        border:1px solid rgba(148,163,184,.16);box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  .card h2{margin:0;padding:12px 16px;font-size:13px;font-weight:600;color:#9fb0c6;
+           border-bottom:1px solid rgba(148,163,184,.12);display:flex;justify-content:space-between;align-items:center}
+  .card h2 .tag{font-size:11px;font-weight:400;color:#64748b}
+  depth-scene{display:block;width:100%;height:52vh;min-height:320px}
+  .log{padding:8px 16px;font:11px/1.7 monospace;color:#6ee7b7;min-height:2.4em;
+       border-top:1px solid rgba(148,163,184,.12);white-space:pre-wrap;word-break:break-all}
+  footer{padding:0 32px 28px;color:#64748b;font-size:12px}
+  footer code{color:#a5b4fc}
+</style>
+</head>
+<body>
+<header>
+  <h1><code>&lt;depth-scene&gt;</code> 一图转 3D 景深原生组件</h1>
+  <div class="sub">单 script 即用 · 推理/网格构建/meshopt 解码跑 Worker(主线程零负担) · WebGPU→WASM SIMD 自动回退 ·
+    随便把一张图片<strong>拖进</strong>右边卡片试试</div>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>端内轨 · 任意图即转 <span class="tag">src → DA-V2 推理 → 分层网格</span></h2>
+    <depth-scene id="live" src="./img/w167-3.jpg" quality="fast"></depth-scene>
+    <div class="log" id="log-live">等待初始化…</div>
+  </div>
+  <div class="card">
+    <h2>资产轨 · 真几何质量上限 <span class="tag">mesh-src → meshopt bins(WASM 解码)</span></h2>
+    <depth-scene id="asset" mesh-src="./img/mesh/w167-3"></depth-scene>
+    <div class="log" id="log-asset">等待初始化…</div>
+  </div>
+</div>
+
+<footer>
+  页面零配置(组件内置 CDN 容错链);内网/离线场景可注入
+  <code>__DEPTH_SCENE_TFS__</code> / <code>__DEPTH_SCENE_MODELS__</code> 指向同源 vendor。
+  主题经 CSS 变量穿透 Shadow DOM:<code>--d3d-surface / --d3d-radius / --d3d-status / --d3d-hint</code>。
+</footer>
+
+<script>
+  // 内网/IAB 场景: 注入同源 vendor(组件本就零配置, 此注入仅是离线加速路径)
+  globalThis.__DEPTH_SCENE_TFS__ = new URL('./vendor/dist/transformers.min.js', location.href).href
+  globalThis.__DEPTH_SCENE_MODELS__ = new URL('./models/', location.href).href
+  globalThis.__DEPTH_SCENE_WASM__ = new URL('./vendor/dist/', location.href).href
+</script>
+<script type="module">
+  import '../dist/depth-component/depth-scene.js'
+  const log = (el) => (e) => {
+    const d = e.detail || {}
+    if (e.type === 'd3d-ready') {
+      const t = []
+      if (d.inferMs) t.push(`推理 ${d.inferMs}ms`)
+      if (d.buildMs) t.push(`网格 ${d.buildMs}ms`)
+      if (d.faces) t.push(`${d.verts.toLocaleString()}顶点/${d.faces.toLocaleString()}面`)
+      el.textContent = `✔ ${d.device||d.mode} 总计 ${d.ms}ms · ${t.join(' · ')}`
+    } else if (e.type === 'd3d-progress') el.textContent = `… ${d.stage}`
+    else if (e.type === 'd3d-error') el.textContent = `✘ ${d.message}`
+  }
+  for (const id of ['live', 'asset']) {
+    const el = document.getElementById(id)
+    el.addEventListener('d3d-ready', log(document.getElementById('log-' + id)))
+    el.addEventListener('d3d-progress', log(document.getElementById('log-' + id)))
+    el.addEventListener('d3d-error', log(document.getElementById('log-' + id)))
+  }
+</script>
+</body>
+</html>

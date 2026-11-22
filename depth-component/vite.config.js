@@ -1,22 +1,26 @@
-// vite.config.js — <depth-viewer> 单文件 IIFE 构建（对齐 ppt-component / music-component 约定）
-// 产物: dist/depth-component/depth-viewer.js （自注册 <depth-viewer>，无外部 CSS/依赖）
+// vite.config.js — <depth-scene> 单文件 IIFE 构建(对齐 ppt-component / music-component 约定)
+// 产物: dist/depth-component/depth-scene.js (自注册 <depth-scene>, 无外部 CSS/依赖)
+// 推理/网格构建/meshopt 解码跑 inline Worker(?worker&inline → base64 内嵌, 单文件承诺不破坏)
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
 
 export default defineConfig({
   publicDir: false,
+  worker: {
+    format: 'iife', // inline worker 也必须是经典脚本
+  },
   build: {
     emptyOutDir: true,
     outDir: resolve(__dirname, 'dist/depth-component'),
     lib: {
-      entry: resolve(__dirname, 'src/depth-viewer.js'),
-      name: 'DepthViewer',
+      entry: resolve(__dirname, 'src/depth-scene.js'),
+      name: 'DepthScene',
       formats: ['iife'],
-      fileName: () => 'depth-viewer',
+      fileName: () => 'depth-scene',
     },
     rollupOptions: {
-      output: { entryFileNames: 'depth-viewer.js' },
-      // transformers.js / onnxruntime-web 不进包：运行时按需从 CDN 动态 import（music-component 的懒加载约定）
+      output: { entryFileNames: 'depth-scene.js' },
+      // transformers.js / onnxruntime-web 不进包: 运行时按需从 CDN 动态 import(music-component 懒加载约定)
       external: [/^@huggingface\//, /^onnxruntime-web/],
     },
     minify: 'terser',
